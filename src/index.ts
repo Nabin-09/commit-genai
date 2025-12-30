@@ -1,13 +1,23 @@
+
 import { getStagedDiff } from "./git/diff";
+import { normalizeMessage } from "./commit/normalize";
+
 import { detectIntent, detectScope } from "./git/analyzer";
+import { stageAll } from "./git/stage";
 import { model } from "./llm/model";
 import { buildPrompt } from "./llm/prompt";
 import { commitSchema } from "./commit/validator";
 import { performCommit } from "./commit/commit";
-import readline from "readline";
+
+const AUTO_COMMIT = process.argv.includes("--commit");
 
 async function main() {
   try {
+    if (AUTO_COMMIT) {
+      console.log("📦 Staging all changes...");
+      stageAll();
+    }
+
     console.log("🔍 Reading staged changes...");
     const diff = getStagedDiff();
 
@@ -17,31 +27,26 @@ async function main() {
     console.log("🤖 Generating commit message...");
     const prompt = buildPrompt(intent, scope, diff);
 
+    console.log("🚀 Sending prompt to Ollama...");
     const response = await model.invoke(prompt);
-    const message = response.content.toString().trim();
+    const raw = response.content.toString();
+    const message = normalizeMessage(raw);
+
 
     commitSchema.parse(message);
 
-    console.log("\nSuggested commit:\n");
-    console.log(`➡ ${message}\n`);
+    console.log("\n📝 Generated Commit Message:\n");
+    console.log(message);
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
-
-    rl.question("Proceed with this commit? (y/n): ", (ans) => {
-      if (ans.toLowerCase() === "y") {
-        performCommit(message);
-        console.log("✅ Commit created.");
-      } else {
-        console.log("❌ Commit aborted.");
-      }
-      rl.close();
-    });
+    if (AUTO_COMMIT) {
+      performCommit(message);
+      console.log("\n✅ Changes committed successfully.");
+    } else {
+      console.log("\nℹ️ Run with --commit to auto stage & commit.");
+    }
 
   } catch (err: any) {
-    console.error("Error:", err.message);
+    console.error("❌ Error:", err.message);
   }
 }
 
